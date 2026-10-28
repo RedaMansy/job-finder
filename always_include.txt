@@ -1,0 +1,36 @@
+# Sponsors to keep even if their SIC code isn't tech (banks, big tech, consultancies...).
+# Use the exact name from the sponsor register, one per line.
+Amazon UK Services Ltd
+Apple Europe Limited
+Google (UK) Limited
+Microsoft Limited
+Microsoft Research Limited
+Arm Limited
+Braze Limited
+Kpler Limited
+Bloomberg LP
+JPMorgan Chase Bank, National Association
+Goldman Sachs International
+Morgan Stanley UK Limited
+Barclays Bank PLC
+Barclays Execution Services Limited
+HSBC Holdings plc
+Lloyds Bank plc
+NatWest Group PLC
+Citi Group
+Visa Europe Limited
+Mastercard UK Management Services LTD
+Monzo Bank Ltd
+Revolut Ltd
+Wise Payments Limited
+Starling Bank Limited
+Accenture (UK) Limited
+Deloitte LLP
+KPMG LLP
+Ernst & Young
+EDF Energy Ltd
+Octopus Energy Limited
+RELX (UK) Limited
+BT Group
+Sky UK Limited
+Ocado Central Services Limited

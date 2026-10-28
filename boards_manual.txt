@@ -1,0 +1,8 @@
+# Sponsor job boards to always pull, for ones the name-guessing misses.
+# Format: Company name | provider | slug
+# provider is one of greenhouse, lever, ashby, workable, smartrecruiters.
+# The slug is the bit of the careers URL after the provider's domain, e.g.
+# jobs.ashbyhq.com/faculty -> faculty, jobs.smartrecruiters.com/Netcompany1 -> Netcompany1
+Faculty Science | ashby | faculty
+Netcompany UK | smartrecruiters | Netcompany1
+Kpler | lever | kpler
