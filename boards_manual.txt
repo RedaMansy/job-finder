@@ -1,8 +1,93 @@
 # Sponsor job boards to always pull, for ones the name-guessing misses.
-# Format: Company name | provider | slug
-# provider is one of greenhouse, lever, ashby, workable, smartrecruiters.
+# Format: Company name | provider | slug [| note shown in Flags]
+# provider is one of greenhouse, lever, ashby, workable, smartrecruiters, workday.
 # The slug is the bit of the careers URL after the provider's domain, e.g.
 # jobs.ashbyhq.com/faculty -> faculty, jobs.smartrecruiters.com/Netcompany1 -> Netcompany1
+# Workday slugs are <tenant>.wd<N>/<site>, from <tenant>.wd<N>.myworkdayjobs.com/<site>.
+# Add a note like "check sponsor register" when the company isn't in sponsors_tech.csv.
 Faculty Science | ashby | faculty
 Netcompany UK | smartrecruiters | Netcompany1
 Kpler | lever | kpler
+
+# Well-known UK tech employers, boards verified 2026-11-05.
+Monzo | greenhouse | monzo
+Deliveroo | greenhouse | deliveroo
+Cloudflare | greenhouse | cloudflare
+Figma | greenhouse | figma
+ElevenLabs | ashby | elevenlabs | check sponsor register
+Datadog | greenhouse | datadog
+Stripe | greenhouse | stripe
+GoCardless | greenhouse | gocardless
+Synthesia | ashby | synthesia
+Spotify | lever | spotify
+Anthropic | greenhouse | anthropic
+OpenAI | ashby | openai
+Isomorphic Labs | greenhouse | isomorphiclabs
+PolyAI | greenhouse | polyai
+Intercom | greenhouse | intercom
+Databricks | greenhouse | databricks
+MongoDB | greenhouse | mongodb
+Elastic | greenhouse | elastic
+Twilio | greenhouse | twilio
+Vercel | greenhouse | vercel
+Notion | ashby | notion | check sponsor register
+Ramp | ashby | ramp
+Cohere | ashby | cohere
+Perplexity | ashby | perplexity
+Helsing | greenhouse | helsing
+Lendable | ashby | lendable
+Cleo | greenhouse | cleo
+Tide | greenhouse | tide
+Kraken Technologies | ashby | krakentech
+Motorway | ashby | motorway
+Canonical | greenhouse | canonical
+Graphcore | greenhouse | graphcore
+Ebury | greenhouse | ebury | check sponsor register
+Braze | greenhouse | braze
+Anaplan | greenhouse | anaplan
+Nearform | greenhouse | nearform
+Solve Intelligence | ashby | solveintelligence
+Decagon | ashby | decagon
+Reflection AI | ashby | reflectionai
+Jane Street | greenhouse | janestreet
+Tripadvisor | greenhouse | tripadvisor
+Harvey | ashby | harvey
+Lovable | ashby | lovable
+Granola | ashby | granola
+CuspAI | ashby | cuspai | check sponsor register
+Writer | ashby | writer
+incident.io | ashby | incident | check sponsor register
+Snowflake | ashby | snowflake
+Scale AI | greenhouse | scaleai
+Coinbase | greenhouse | coinbase | check sponsor register
+Airbnb | greenhouse | airbnb
+Dropbox | greenhouse | dropbox
+Reddit | greenhouse | reddit
+Duolingo | greenhouse | duolingo
+Squarespace | greenhouse | squarespace
+Affirm | greenhouse | affirm
+TrueLayer | greenhouse | truelayer
+Primer | ashby | primer
+SumUp | greenhouse | sumup
+
+# Big employers on Workday.
+Accenture | workday | accenture.wd103/AccentureCareers
+Elsevier (RELX) | workday | relx.wd3/ElsevierJobs
+LSEG | workday | lseg.wd3/Careers
+Hewlett Packard Enterprise | workday | hpe.wd5/Jobsathpe
+NVIDIA | workday | nvidia.wd5/NVIDIAExternalCareerSite
+Salesforce | workday | salesforce.wd12/External_Career_Site
+Mastercard | workday | mastercard.wd1/CorporateCareers
+Deutsche Bank | workday | db.wd3/DBWebsite | check sponsor register
+Citi | workday | citi.wd5/2 | check sponsor register
+Intel | workday | intel.wd1/External
+Adobe | workday | adobe.wd5/external_experienced
+Workday | workday | workday.wd5/Workday
+Autodesk | workday | autodesk.wd1/Ext
+PwC | workday | pwc.wd3/Global_Experienced_Careers
+Barclays | workday | barclays.wd3/External_Career_Site_Barclays
+AVEVA | workday | aveva.wd3/AVEVA_careers
+Morgan Stanley | workday | ms.wd5/External
+Expedia | workday | expedia.wd108/search
+Thomson Reuters | workday | thomsonreuters.wd5/External_Career_Site
+Kainos | workday | kainos.wd3/Kainos

@@ -5,7 +5,8 @@ wording and salaries under the new-entrant going rate, and drops anything alread
 tracked in the vault.
 
 Usage:
-    python daily.py                 # writes ../Shortlist.md
+    python daily.py                 # writes <vault>/Shortlist.md
+    python daily.py --vault D:/notes/job-apps
     python daily.py --days 30       # only roles posted in the last 30 days
 
 Reads data/boards.jsonl (from find_boards.py) and boards_manual.txt.
@@ -14,17 +15,22 @@ import argparse
 import csv
 import html
 import json
+import os
 import re
+import time
+import urllib.error
+import urllib.request
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from build_sponsors import norm
-from find_boards import get
+from find_boards import UA, get
 
 HERE = Path(__file__).parent
-VAULT = HERE.parent
+# The Obsidian job-apps vault: read to skip tracked roles, and Shortlist.md goes there.
+VAULT = Path(os.environ.get("JOB_APPS_VAULT", HERE.parent / "job-apps"))
 BOARDS = HERE / "data" / "boards.jsonl"
 MANUAL = HERE / "boards_manual.txt"
 SEEN = HERE / "data" / "seen.json"
@@ -34,6 +40,10 @@ OUT_CSV = HERE / "data" / "shortlist.csv"
 # Lower ("new entrant") going rate for SOC 2134, gov.uk table updated 22 July 2025.
 # 2139 (DevOps, IT consultants) is £38,700 and 2133 (data engineers, architects) £42,400.
 MIN_SALARY = 40_000
+# Postings that ask for at least this many years of experience get flagged and sorted down.
+MAX_YEARS = 5
+# Cap on postings pulled per Workday board (after the UK filter), 20 per request.
+WORKDAY_MAX = 1000
 
 ROLE = re.compile(
     r"software|developer|engineer|engineering|\bsre\b|devops|\bdata\b|machine learning|"
@@ -45,7 +55,17 @@ NOT_ROLE = re.compile(
     r"chief|distinguished|(?<!solutions )architect|\bintern(ship)?\b|placement|apprentice|"
     r"mechanical|electrical|civil|hardware|\brf\b|manufacturing|field service|chemical|"
     r"structural|process engineer|sales|account executive|recruit|\biii\b|\biv\b|"
-    r"\bl[4-9]\b|level [4-9]", re.I)
+    r"\bl[4-9]\b|level [4-9]|scientist|researcher|analyst|service desk|"
+    r"\bvice president\b|\bavp\b|\bsvp\b|\bmd\b|managing director|"
+    r"\b(german|french|spanish|italian|dutch|japanese|korean|mandarin)\b|"
+    r"electronic|embedded|firmware|\bfpga\b|\basic\b|silicon|high voltage|highways|"
+    r"\b3d\b|fellow|expression of interest|people partner|talent|weekend|contractor|"
+    r"people operations|banker|go-to-market|gtm|marketing|legal|counsel", re.I)
+# Titles that look like the roles applied to so far get a ★ and sort first.
+STRONG = re.compile(
+    r"software|back[- ]?end|full[- ]?stack|python|\bai\b|applied ai|\bllm\b|"
+    r"forward[- ]deployed|data engineer|developer|product engineer|devops|platform engineer|"
+    r"solutions? (engineer|architect|consultant)", re.I)
 JUNIOR = re.compile(
     r"graduate|\bgrad\b|junior|\bjr\.?\b|entry|early career|new grad|associate|\bi\b|"
     r"\bl[12]\b|level [12]|trainee", re.I)
@@ -57,6 +77,14 @@ UK = re.compile(
     r"guildford|milton keynes|southampton|\byork\b|swansea|aberdeen|dundee|exeter|"
     r"bournemouth|coventry|leicester|norwich|cheltenham|basingstoke|slough", re.I)
 REMOTE_EU = re.compile(r"remote.*(emea|europe)|(emea|europe).*remote", re.I)
+# Places that would otherwise trip UK (New York -> "york", Cambridge MA, Georgia "GB"...).
+NOT_UK = re.compile(
+    r"new york|new england|new south wales|cambridge,? (ma|massachusetts)|"
+    r"birmingham,? (al|alabama)|reading,? (pa|pennsylvania)|bath,? (me|maine)|"
+    r"(london|cambridge|richmond),? (on|ontario|ky|kentucky|va|virginia)", re.I)
+YEARS = re.compile(
+    r"(\d{1,2})\s*\+?\s*(?:(?:-|–|to)\s*\d{1,2}\s*\+?\s*)?years?\b(?:'|’)?[^.;]{0,60}?"
+    r"experience", re.I)
 
 NO_SPONSOR = re.compile(
     r"(not|unable to|cannot|can't|won't|will not|do not|don't|are not able to)\s+"
@@ -149,6 +177,8 @@ def fetch(board):
                                          + (" (remote)" if j.get("telecommuting") else ""),
                              "url": j["url"], "posted": ts(j.get("published_on")),
                              "desc": "", "salary": ""})
+        elif p == "workday":
+            jobs = fetch_workday(slug)
         elif p == "smartrecruiters":
             _, b = get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
                        "?country=gb&limit=100")
@@ -164,6 +194,89 @@ def fetch(board):
     for j in jobs:
         j.update(company=board["name"], provider=p, slug=slug, check=board.get("check", ""))
     return jobs
+
+
+def post_json(url, body, retries=3, timeout=20):
+    for attempt in range(retries):
+        try:
+            req = urllib.request.Request(url, json.dumps(body).encode(),
+                                         {**UA, "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code != 429:
+                return {}
+            time.sleep(5 * (attempt + 1))
+        except (TimeoutError, OSError, ValueError):
+            return {}
+    return {}
+
+
+def workday_posted(s):
+    """'Posted Today' / 'Posted 3 Days Ago' / 'Posted 30+ Days Ago' -> date."""
+    s = (s or "").lower()
+    if "today" in s:
+        return date.today()
+    if "yesterday" in s:
+        return date.today() - timedelta(days=1)
+    m = re.search(r"(\d+)", s)
+    return date.today() - timedelta(days=int(m.group(1))) if m else None
+
+
+def fetch_workday(slug):
+    """slug is '<tenant>.wd<N>/<site>', e.g. 'accenture.wd103/AccentureCareers'.
+
+    Workday boards are huge and global, so filter to the UK with the country facet when
+    the tenant has one, keep only titles that pass the role filter, and fetch the full
+    posting (description, all locations) for just those.
+    """
+    host, site = slug.split("/")
+    tenant = host.split(".")[0]
+    base = f"https://{host}.myworkdayjobs.com"
+    api = f"{base}/wday/cxs/{tenant}/{site}"
+
+    first = post_json(f"{api}/jobs", {"appliedFacets": {}, "limit": 1, "offset": 0,
+                                      "searchText": ""})
+    facets = {}
+
+    def find_uk(fs):
+        for f in fs:
+            for v in f.get("values") or []:
+                if "values" in v:
+                    find_uk([v])
+                elif v.get("descriptor") == "United Kingdom":
+                    facets[f["facetParameter"]] = [v["id"]]
+    find_uk(first.get("facets") or [])
+
+    postings, offset, total = [], 0, None
+    while total is None or offset < min(total, WORKDAY_MAX):
+        page = post_json(f"{api}/jobs", {"appliedFacets": facets, "limit": 20,
+                                         "offset": offset, "searchText": ""})
+        batch = page.get("jobPostings") or []
+        if not batch:
+            break
+        if total is None:
+            total = page.get("total", 0)
+        postings += batch
+        offset += 20
+
+    cands = [p for p in postings if title_ok(p.get("title", ""))]
+
+    def detail(p):
+        info = (json.loads(get(api + p["externalPath"])[1] or b"{}")
+                .get("jobPostingInfo") or {})
+        locs = [info.get("location") or p.get("locationsText", "")]
+        locs += info.get("additionalLocations") or []
+        country = (info.get("country") or {}).get("descriptor", "")
+        return {"id": info.get("jobReqId") or p["externalPath"].rsplit("_", 1)[-1],
+                "title": p["title"],
+                "location": " / ".join(filter(None, locs + [country])),
+                "url": base + "/" + site + p["externalPath"],
+                "posted": ts(info.get("startDate")) or workday_posted(p.get("postedOn")),
+                "desc": text(info.get("jobDescription")), "salary": ""}
+
+    with ThreadPoolExecutor(4) as pool:
+        return list(pool.map(detail, cands))
 
 
 def load_boards():
@@ -188,9 +301,9 @@ def load_boards():
     if MANUAL.exists():
         for line in MANUAL.read_text(encoding="utf-8").splitlines():
             if line.strip() and not line.startswith("#"):
-                name, provider, slug = (x.strip() for x in line.split("|"))
+                name, provider, slug, *note = (x.strip() for x in line.split("|"))
                 boards[(provider, slug)] = {"name": name, "provider": provider,
-                                            "slug": slug, "check": ""}
+                                            "slug": slug, "check": "".join(note)}
     return list(boards.values())
 
 
@@ -216,19 +329,29 @@ def tracked():
     return urls, ids, pairs
 
 
+def title_ok(title):
+    return bool(ROLE.search(title)) and not NOT_ROLE.search(title)
+
+
+def is_uk(loc):
+    """True if any of the listed locations is in the UK."""
+    return any(UK.search(NOT_UK.sub(" ", part))
+               for part in re.split(r"\s*(?:/|;|\|)\s*", loc))
+
+
 def classify(j):
     """Return None to drop, else add level/flags to the job."""
     title = j["title"]
-    if not ROLE.search(title) or NOT_ROLE.search(title):
+    if not title_ok(title):
         return None
     loc = j["location"]
-    if UK.search(loc):
-        j["where"] = loc
+    if is_uk(loc):
+        j["where"] = loc if len(loc) <= 80 else loc[:77] + "..."
     elif REMOTE_EU.search(loc):
         j["where"] = loc + " ⚠ check UK-based"
     else:
         return None
-    j["level"] = "target" if JUNIOR.search(title) else "reach"
+    j["level"] = "junior" if JUNIOR.search(title) else "mid"
 
     flags = []
     if NO_SPONSOR.search(j["desc"]):
@@ -242,6 +365,9 @@ def classify(j):
             j["salary"] = f"£{min(vals):,}–£{top:,}" if len(vals) > 1 else f"£{top:,}"
         if top < MIN_SALARY:
             flags.append(f"⚠ max salary £{top:,} < £{MIN_SALARY:,}")
+    years = [int(y) for y in YEARS.findall(j["desc"]) if int(y) <= 15]
+    if years and max(years) >= MAX_YEARS:
+        flags.append(f"⚠ asks {max(years)}+ yrs")
     if j["check"]:
         flags.append("🔍 " + j["check"])
     j["flags"] = "; ".join(flags)
@@ -249,10 +375,18 @@ def classify(j):
 
 
 def main():
+    global VAULT, OUT_MD
     ap = argparse.ArgumentParser()
     ap.add_argument("--days", type=int, default=0, help="drop roles posted longer ago")
     ap.add_argument("--workers", type=int, default=16)
+    ap.add_argument("--vault", type=Path, default=VAULT,
+                    help="job-apps vault (default $JOB_APPS_VAULT or ../job-apps)")
+    ap.add_argument("--show-no-sponsor", action="store_true",
+                    help="keep roles whose description says no sponsorship")
     args = ap.parse_args()
+    VAULT, OUT_MD = args.vault, args.vault / "Shortlist.md"
+    if not VAULT.is_dir():
+        ap.error(f"vault not found: {VAULT}")
 
     boards = load_boards()
     with ThreadPoolExecutor(args.workers) as pool:
@@ -273,6 +407,9 @@ def main():
             continue
         if not classify(j):
             continue
+        if "❌" in j["flags"] and not args.show_no_sponsor:
+            continue
+        j["fit"] = "★" if STRONG.search(j["title"]) else ""
         dupes.add(u)
         j["first_seen"] = seen.setdefault(u, today)
         keep.append(j)
@@ -282,11 +419,12 @@ def main():
     SEEN.write_text(json.dumps(seen, indent=0), encoding="utf-8")
 
     def sort_key(j):
-        return (j["first_seen"] != today, "❌" in j["flags"], j["level"] != "target",
+        return (j["first_seen"] != today, "❌" in j["flags"], not j["fit"],
+                "yrs" in j["flags"], j["level"] != "junior",
                 -(j["posted"] or date.min).toordinal(), j["company"].lower())
     keep.sort(key=sort_key)
 
-    cols = ["first_seen", "company", "title", "level", "where", "salary", "posted",
+    cols = ["first_seen", "fit", "company", "title", "level", "where", "salary", "posted",
             "flags", "url", "provider"]
     with open(OUT_CSV, "w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=cols, extrasaction="ignore")
@@ -310,15 +448,16 @@ def write_md(jobs, today, n_boards, n_jobs):
         "# Sponsored role shortlist", "",
         f"Generated {today} from {n_boards} sponsor job boards ({n_jobs} open roles scanned). "
         f"Licensed sponsors only, UK or UK-remote, below senior level, not already tracked. "
-        f"**target** = graduate/junior/associate, **reach** = mid-level. "
-        f"Run `/apply <link>` on anything worth it.", "",
+        f"Roles that say no sponsorship are hidden. ★ = title like the roles applied to so far "
+        f"(sorted first). **junior** = graduate/junior/associate/level I, **mid** = no level "
+        f"in the title. Run `/apply <link>` on anything worth it.", "",
     ]
 
     def table(rows):
-        out = ["| Company | Role | Level | Location | Salary | Posted | Flags |",
-               "|---|---|---|---|---|---|---|"]
+        out = ["| ★ | Company | Role | Level | Location | Salary | Posted | Flags |",
+               "|---|---|---|---|---|---|---|---|"]
         for j in rows:
-            out.append(f"| {cell(j['company'])} | [{cell(j['title'])}]({j['url']}) | "
+            out.append(f"| {j['fit']} | {cell(j['company'])} | [{cell(j['title'])}]({j['url']}) | "
                        f"{j['level']} | {cell(j['where'])} | {cell(j['salary'])} | "
                        f"{j['posted'] or ''} | {cell(j['flags'])} |")
         return out

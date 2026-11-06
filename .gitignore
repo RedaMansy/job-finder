@@ -1,0 +1,4 @@
+# Downloads and generated data
+data/
+
+__pycache__/
