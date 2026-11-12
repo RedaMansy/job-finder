@@ -1,6 +1,7 @@
 # Sponsor job boards to always pull, for ones the name-guessing misses.
 # Format: Company name | provider | slug [| note shown in Flags]
-# provider is one of greenhouse, lever, ashby, workable, smartrecruiters, workday.
+# provider is one of greenhouse, lever, ashby, workable, smartrecruiters, workday,
+# avature, successfactors, kpmg-uk (the last three scrape career-site HTML; see daily.py).
 # The slug is the bit of the careers URL after the provider's domain, e.g.
 # jobs.ashbyhq.com/faculty -> faculty, jobs.smartrecruiters.com/Netcompany1 -> Netcompany1
 # Workday slugs are <tenant>.wd<N>/<site>, from <tenant>.wd<N>.myworkdayjobs.com/<site>.
@@ -84,10 +85,16 @@ Intel | workday | intel.wd1/External
 Adobe | workday | adobe.wd5/external_experienced
 Workday | workday | workday.wd5/Workday
 Autodesk | workday | autodesk.wd1/Ext
-PwC | workday | pwc.wd3/Global_Experienced_Careers
 Barclays | workday | barclays.wd3/External_Career_Site_Barclays
 AVEVA | workday | aveva.wd3/AVEVA_careers
 Morgan Stanley | workday | ms.wd5/External
 Expedia | workday | expedia.wd108/search
 Thomson Reuters | workday | thomsonreuters.wd5/External_Career_Site
 Kainos | workday | kainos.wd3/Kainos
+
+# Big 4, added 2026-11-11. PwC UK's jobs sit on its own Workday site (shared with India,
+# so daily.py filters by UK office); the others run their own career sites.
+PwC | workday | pwc.wd3/CRM_Experienced_Careers_Site
+Deloitte | avature | apply.deloitte.co.uk/UKCareers
+EY | successfactors | careers.ey.com/ey?optionsFacetsDD_country=GB
+KPMG | kpmg-uk | www.kpmgcareers.co.uk

@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Job shortlist</title>
+<style>
+  :root {
+    --bg: #f7f7f5; --panel: #fff; --text: #1d1d1b; --muted: #6b6b66; --line: #e4e4df;
+    --accent: #2f6f4f; --accent-soft: #e5f0ea; --warn: #9a5b00; --warn-soft: #fbf1df;
+    --sel: #eef3f0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --panel: #1e1e1c; --text: #ecece8; --muted: #9a9a93; --line: #31312e;
+      --accent: #7cc49d; --accent-soft: #23362b; --warn: #e0a54a; --warn-soft: #3a2e1a;
+      --sel: #262b28;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg); color: var(--text);
+    display: grid; grid-template-rows: auto 1fr;
+  }
+  header {
+    display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center;
+    padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 15px; margin: 0 6px 0 0; }
+  header .meta { color: var(--muted); font-size: 12px; margin-left: auto; }
+  input[type=search] {
+    font: inherit; padding: 6px 10px; width: 260px; border: 1px solid var(--line);
+    border-radius: 6px; background: var(--bg); color: var(--text);
+  }
+  select, button {
+    font: inherit; padding: 5px 8px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--panel); color: var(--text); cursor: pointer;
+  }
+  label.chk { display: inline-flex; gap: 5px; align-items: center; cursor: pointer;
+    user-select: none; }
+  main { display: grid; grid-template-columns: minmax(340px, 42%) 1fr; min-height: 0; }
+  #list { overflow-y: auto; border-right: 1px solid var(--line); background: var(--panel); }
+  #count { padding: 8px 16px; color: var(--muted); font-size: 12px;
+    border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+  .job { padding: 9px 16px; border-bottom: 1px solid var(--line); cursor: pointer; }
+  .job:hover { background: var(--bg); }
+  .job.sel { background: var(--sel); box-shadow: inset 3px 0 0 var(--accent); }
+  .job.hidden-job { opacity: .45; }
+  .job .t { font-weight: 600; }
+  .job .c { color: var(--muted); font-size: 13px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; background: var(--bg);
+    color: var(--muted); border: 1px solid var(--line); }
+  .tag.star, .tag.new, .tag.junior { background: var(--accent-soft); color: var(--accent);
+    border-color: transparent; }
+  .tag.flag { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+  .tag.saved { background: var(--accent); color: var(--panel); border-color: transparent; }
+  #detail { overflow-y: auto; padding: 20px 28px 40px; }
+  #detail h2 { margin: 0 0 4px; font-size: 20px; }
+  #detail .sub { color: var(--muted); margin-bottom: 10px; }
+  #detail .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }
+  #detail .actions a.primary {
+    background: var(--accent); color: var(--panel); text-decoration: none; padding: 6px 12px;
+    border-radius: 6px; font-weight: 600;
+  }
+  #detail dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px;
+    margin: 0 0 18px; }
+  #detail dt { color: var(--muted); }
+  #detail dd { margin: 0; }
+  #desc { max-width: 75ch; white-space: pre-wrap; }
+  .empty { color: var(--muted); padding: 40px; text-align: center; }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 3px;
+    padding: 0 4px; background: var(--bg); }
+  .help { color: var(--muted); font-size: 12px; margin-top: 30px; }
+  .mobile-only { display: none; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; }
+    .mobile-only { display: inline-block; }
+    #detail { display: none; }
+    main.show-detail #list { display: none; }
+    main.show-detail #detail { display: block; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Job shortlist</h1>
+  <input type="search" id="q" placeholder="Search title, company, description…  ( / )">
+  <select id="view" title="Which jobs to show">
+    <option value="open">Not hidden</option>
+    <option value="saved">Saved</option>
+    <option value="hidden">Hidden</option>
+    <option value="all">Everything</option>
+  </select>
+  <select id="days" title="Posted within">
+    <option value="0">Any date</option>
+    <option value="7">Last 7 days</option>
+    <option value="30">Last 30 days</option>
+    <option value="90">Last 90 days</option>
+  </select>
+  <select id="sort" title="Sort">
+    <option value="default">Best first</option>
+    <option value="posted">Newest posted</option>
+    <option value="company">Company A–Z</option>
+  </select>
+  <label class="chk"><input type="checkbox" id="star"> ★ only</label>
+  <label class="chk"><input type="checkbox" id="junior"> Junior only</label>
+  <label class="chk"><input type="checkbox" id="newonly"> New only</label>
+  <label class="chk"><input type="checkbox" id="noyrs"> Hide 5+ yrs</label>
+  <span class="meta" id="meta"></span>
+</header>
+<main id="main">
+  <section id="list"><div id="count"></div><div id="rows"></div></section>
+  <section id="detail"><div class="empty">Pick a job on the left.</div></section>
+</main>
+
+<script src="jobs.js"></script>
+<script>
+const data = window.SHORTLIST;
+const $ = id => document.getElementById(id);
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)) || {}; } catch { return {}; } },
+  set(k, v) { localStorage.setItem(k, JSON.stringify(v)); },
+};
+let saved = store.get("saved"), hidden = store.get("hidden");
+let shown = [], selUrl = null;
+
+const esc = s => String(s ?? "").replace(/[&<>"]/g,
+  c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+const daysAgo = d => d ? Math.round((Date.now() - new Date(d)) / 864e5) : null;
+const ago = d => {
+  const n = daysAgo(d);
+  return n === null ? "" : n <= 0 ? "today" : n === 1 ? "yesterday" : `${n}d ago`;
+};
+
+if (!data) {
+  $("rows").innerHTML = '<div class="empty">No <code>jobs.js</code> yet. Run ' +
+    '<code>python daily.py</code> in the job-finder folder, then reload.</div>';
+} else {
+  data.jobs.forEach((j, i) => { j.rank = i; j.hay = (j.title + " " + j.company + " " +
+    j.where + " " + j.desc).toLowerCase(); });
+  $("meta").textContent = `Generated ${data.generated} · ${data.boards} boards · ` +
+    `${data.scanned.toLocaleString()} roles scanned`;
+  // Restore filters from last visit.
+  const prefs = store.get("prefs");
+  for (const id of ["view", "days", "sort"]) if (prefs[id]) $(id).value = prefs[id];
+  for (const id of ["star", "junior", "newonly", "noyrs"]) $(id).checked = !!prefs[id];
+  render();
+}
+
+function filtered() {
+  const q = $("q").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const view = $("view").value, days = +$("days").value;
+  let out = data.jobs.filter(j => {
+    if (view === "open" && hidden[j.url]) return false;
+    if (view === "saved" && !saved[j.url]) return false;
+    if (view === "hidden" && !hidden[j.url]) return false;
+    if ($("star").checked && !j.fit) return false;
+    if ($("junior").checked && j.level !== "junior") return false;
+    if ($("newonly").checked && j.first_seen !== data.generated) return false;
+    if ($("noyrs").checked && j.flags.includes("yrs")) return false;
+    if (days && (daysAgo(j.posted) ?? 1e9) > days) return false;
+    return q.every(w => j.hay.includes(w));
+  });
+  const s = $("sort").value;
+  if (s === "posted") out.sort((a, b) => (b.posted || "").localeCompare(a.posted || ""));
+  else if (s === "company") out.sort((a, b) => a.company.localeCompare(b.company) ||
+                                               a.title.localeCompare(b.title));
+  else out.sort((a, b) => a.rank - b.rank);
+  return out;
+}
+
+function tags(j) {
+  const t = [];
+  if (saved[j.url]) t.push('<span class="tag saved">saved</span>');
+  if (j.fit) t.push('<span class="tag star">★ fit</span>');
+  if (j.first_seen === data.generated) t.push('<span class="tag new">new</span>');
+  t.push(`<span class="tag ${j.level === "junior" ? "junior" : ""}">${esc(j.level)}</span>`);
+  if (j.salary) t.push(`<span class="tag">${esc(j.salary)}</span>`);
+  if (j.posted) t.push(`<span class="tag">posted ${ago(j.posted)}</span>`);
+  for (const f of j.flags.split("; ").filter(Boolean))
+    t.push(`<span class="tag ${f.startsWith("✅") ? "star" : "flag"}">${esc(f)}</span>`);
+  return t.join("");
+}
+
+function render() {
+  const prefs = {};
+  for (const id of ["view", "days", "sort"]) prefs[id] = $(id).value;
+  for (const id of ["star", "junior", "newonly", "noyrs"]) prefs[id] = $(id).checked;
+  store.set("prefs", prefs);
+
+  shown = filtered();
+  $("count").textContent = `${shown.length} of ${data.jobs.length} jobs` +
+    ` · ${Object.keys(saved).length} saved · ${Object.keys(hidden).length} hidden`;
+  $("rows").innerHTML = shown.length ? shown.map((j, i) => `
+    <div class="job ${j.url === selUrl ? "sel" : ""} ${hidden[j.url] ? "hidden-job" : ""}"
+         data-i="${i}">
+      <div class="t">${esc(j.title)}</div>
+      <div class="c">${esc(j.company)} · ${esc(j.where)}</div>
+      <div class="tags">${tags(j)}</div>
+    </div>`).join("") : '<div class="empty">Nothing matches these filters.</div>';
+  if (selUrl && !shown.some(j => j.url === selUrl)) selUrl = null;
+  if (!selUrl && shown.length && matchMedia("(min-width: 801px)").matches) select(0, false);
+  else showDetail();
+}
+
+function select(i, scroll = true) {
+  if (!shown[i]) return;
+  selUrl = shown[i].url;
+  document.querySelectorAll(".job").forEach(el =>
+    el.classList.toggle("sel", +el.dataset.i === i));
+  if (scroll) document.querySelector(`.job[data-i="${i}"]`)
+    ?.scrollIntoView({block: "nearest"});
+  showDetail();
+  $("main").classList.add("show-detail");
+}
+
+function showDetail() {
+  const j = shown.find(j => j.url === selUrl);
+  if (!j) { $("detail").innerHTML = '<div class="empty">Pick a job on the left.</div>'; return; }
+  $("detail").innerHTML = `
+    <h2>${esc(j.title)}</h2>
+    <div class="sub">${esc(j.company)} · ${esc(j.where)}</div>
+    <div class="tags">${tags(j)}</div>
+    <div class="actions">
+      <a class="primary" href="${esc(j.url)}" target="_blank" rel="noopener">Open posting ↗</a>
+      <button id="copy" title="Copy /apply command">Copy /apply</button>
+      <button id="save">${saved[j.url] ? "Unsave" : "Save"}</button>
+      <button id="hide">${hidden[j.url] ? "Unhide" : "Hide"}</button>
+      <button id="back" class="mobile-only">← Back</button>
+    </div>
+    <dl>
+      <dt>Posted</dt><dd>${esc(j.posted) || "—"} ${j.posted ? `(${ago(j.posted)})` : ""}</dd>
+      <dt>First seen</dt><dd>${esc(j.first_seen)}</dd>
+      <dt>Salary</dt><dd>${esc(j.salary) || "—"}</dd>
+      <dt>Board</dt><dd>${esc(j.provider)}</dd>
+    </dl>
+    <div id="desc">${j.desc ? esc(j.desc) : '<span style="color:var(--muted)">' +
+      'No description from this board. Open the posting to read it.</span>'}</div>
+    <div class="help">Keys: <kbd>j</kbd>/<kbd>k</kbd> next/previous · <kbd>o</kbd> open ·
+      <kbd>s</kbd> save · <kbd>h</kbd> hide · <kbd>c</kbd> copy /apply · <kbd>/</kbd> search</div>`;
+  $("copy").onclick = () => copyApply(j);
+  $("save").onclick = () => toggle("saved", j);
+  $("hide").onclick = () => toggle("hidden", j);
+  $("back").onclick = () => $("main").classList.remove("show-detail");
+  $("detail").scrollTop = 0;
+}
+
+function toggle(kind, j) {
+  const m = kind === "saved" ? saved : hidden;
+  if (m[j.url]) delete m[j.url]; else m[j.url] = data.generated;
+  if (kind === "hidden" && m[j.url]) delete saved[j.url];
+  if (kind === "saved" && m[j.url]) delete hidden[j.url];
+  store.set("saved", saved); store.set("hidden", hidden);
+  // Hiding moves on to the next job rather than leaving an empty pane.
+  const i = shown.findIndex(x => x.url === j.url);
+  render();
+  if (!shown.some(x => x.url === j.url)) select(Math.min(i, shown.length - 1));
+}
+
+function copyApply(j) {
+  navigator.clipboard.writeText(`/apply ${j.url}`).then(() => {
+    $("copy").textContent = "Copied ✓";
+    setTimeout(() => { if ($("copy")) $("copy").textContent = "Copy /apply"; }, 1200);
+  });
+}
+
+$("rows").addEventListener("click", e => {
+  const el = e.target.closest(".job");
+  if (el) select(+el.dataset.i, false);
+});
+for (const id of ["view", "days", "sort", "star", "junior", "newonly", "noyrs"])
+  $(id).addEventListener("change", render);
+$("q").addEventListener("input", render);
+
+document.addEventListener("keydown", e => {
+  if (e.target.matches("input, select")) {
+    if (e.key === "Escape") e.target.blur();
+    return;
+  }
+  const i = shown.findIndex(j => j.url === selUrl), j = shown[i];
+  if (e.key === "j" || e.key === "ArrowDown") { select(i + 1); e.preventDefault(); }
+  else if (e.key === "k" || e.key === "ArrowUp") { select(Math.max(i - 1, 0)); e.preventDefault(); }
+  else if (e.key === "/") { $("q").focus(); e.preventDefault(); }
+  else if (!j) return;
+  else if (e.key === "o") window.open(j.url, "_blank", "noopener");
+  else if (e.key === "s") toggle("saved", j);
+  else if (e.key === "h") toggle("hidden", j);
+  else if (e.key === "c") copyApply(j);
+});
+</script>
+</body>
+</html>

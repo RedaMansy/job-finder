@@ -36,6 +36,7 @@ MANUAL = HERE / "boards_manual.txt"
 SEEN = HERE / "data" / "seen.json"
 OUT_MD = VAULT / "Shortlist.md"
 OUT_CSV = HERE / "data" / "shortlist.csv"
+OUT_JS = HERE / "web" / "jobs.js"
 
 # Lower ("new entrant") going rate for SOC 2134, gov.uk table updated 22 July 2025.
 # 2139 (DevOps, IT consultants) is £38,700 and 2133 (data engineers, architects) £42,400.
@@ -60,12 +61,16 @@ NOT_ROLE = re.compile(
     r"\b(german|french|spanish|italian|dutch|japanese|korean|mandarin)\b|"
     r"electronic|embedded|firmware|\bfpga\b|\basic\b|silicon|high voltage|highways|"
     r"\b3d\b|fellow|expression of interest|people partner|talent|weekend|contractor|"
-    r"people operations|banker|go-to-market|gtm|marketing|legal|counsel", re.I)
+    r"people operations|banker|go-to-market|\bgtm\b|marketing|legal|counsel", re.I)
 # Titles that look like the roles applied to so far get a ★ and sort first.
 STRONG = re.compile(
     r"software|back[- ]?end|full[- ]?stack|python|\bai\b|applied ai|\bllm\b|"
     r"forward[- ]deployed|data engineer|developer|product engineer|devops|platform engineer|"
     r"solutions? (engineer|architect|consultant)", re.I)
+# Big 4 / consultancy grades that sit around 2-5 years' experience despite the wording
+# (PwC Senior Associate, Deloitte and EY Senior Consultant, KPMG Assistant Manager).
+# They're ignored by the seniority filter and noted in Flags.
+GRADE = re.compile(r"senior associate|senior consultant|assistant manager", re.I)
 JUNIOR = re.compile(
     r"graduate|\bgrad\b|junior|\bjr\.?\b|entry|early career|new grad|associate|\bi\b|"
     r"\bl[12]\b|level [12]|trainee", re.I)
@@ -75,13 +80,17 @@ UK = re.compile(
     r"\bgb\b|london|manchester|edinburgh|glasgow|bristol|cambridge|oxford|leeds|birmingham|"
     r"belfast|cardiff|reading|newcastle|sheffield|nottingham|liverpool|brighton|bath|"
     r"guildford|milton keynes|southampton|\byork\b|swansea|aberdeen|dundee|exeter|"
-    r"bournemouth|coventry|leicester|norwich|cheltenham|basingstoke|slough", re.I)
+    r"bournemouth|coventry|leicester|norwich|cheltenham|basingstoke|slough|watford|"
+    r"bradford|east midlands|castle donington|derby|plymouth|ipswich|luton|st albans|"
+    r"chelmsford|gloucester|bracknell|stirling|inverness|telford|hull\b", re.I)
 REMOTE_EU = re.compile(r"remote.*(emea|europe)|(emea|europe).*remote", re.I)
 # Places that would otherwise trip UK (New York -> "york", Cambridge MA, Georgia "GB"...).
 NOT_UK = re.compile(
     r"new york|new england|new south wales|cambridge,? (ma|massachusetts)|"
-    r"birmingham,? (al|alabama)|reading,? (pa|pennsylvania)|bath,? (me|maine)|"
+    r"birmingham,? (al|alabama)|\bal-birmingham|reading,? (pa|pennsylvania)|bath,? (me|maine)|"
     r"(london|cambridge|richmond),? (on|ontario|ky|kentucky|va|virginia)", re.I)
+# Banks often leave the corporate title out of the job title and open the description with it.
+SENIOR_DESC = re.compile(r"\b(SVP|AVP|VP)\b|vice president", re.I)
 YEARS = re.compile(
     r"(\d{1,2})\s*\+?\s*(?:(?:-|–|to)\s*\d{1,2}\s*\+?\s*)?years?\b(?:'|’)?[^.;]{0,60}?"
     r"experience", re.I)
@@ -98,7 +107,15 @@ MONEY = re.compile(r"£\s?(\d{2,3}(?:,\d{3})|\d{2,3}(?:\.\d)?\s?[kK])\b")
 
 
 def text(s):
-    return re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", html.unescape(s or ""))).strip()
+    """HTML -> plain text, keeping paragraph breaks and bullets for the web view."""
+    s = html.unescape(s or "")
+    s = re.sub(r"(?i)<li[^>]*>", "\n• ", s)
+    s = re.sub(r"(?i)<br\s*/?>", "\n", s)
+    s = re.sub(r"(?i)</(p|div|ul|ol|h[1-6]|tr|table)>", "\n\n", s)
+    s = re.sub(r"<[^>]+>", " ", s)
+    s = re.sub(r"[^\S\n]+", " ", s)
+    s = re.sub(r" *\n *", "\n", s)
+    return re.sub(r"\n{3,}", "\n\n", s).strip()
 
 
 def money(s):
@@ -179,6 +196,12 @@ def fetch(board):
                              "desc": "", "salary": ""})
         elif p == "workday":
             jobs = fetch_workday(slug)
+        elif p == "avature":
+            jobs = fetch_avature(slug)
+        elif p == "successfactors":
+            jobs = fetch_successfactors(slug)
+        elif p == "kpmg-uk":
+            jobs = fetch_kpmg_uk(slug)
         elif p == "smartrecruiters":
             _, b = get(f"https://api.smartrecruiters.com/v1/companies/{slug}/postings"
                        "?country=gb&limit=100")
@@ -248,6 +271,19 @@ def fetch_workday(slug):
                     facets[f["facetParameter"]] = [v["id"]]
     find_uk(first.get("facets") or [])
 
+    # No country facet (e.g. PwC UK's site, shared with India): pick the UK offices
+    # from the locations facet instead, so the cap isn't spent on other countries.
+    def uk_offices(fs):
+        for f in fs:
+            vals = f.get("values") or []
+            if f.get("facetParameter") == "locations":
+                ids = [v["id"] for v in vals if "id" in v and is_uk(v.get("descriptor", ""))]
+                if ids:
+                    facets["locations"] = ids
+            uk_offices([v for v in vals if "values" in v])
+    if not facets:
+        uk_offices(first.get("facets") or [])
+
     postings, offset, total = [], 0, None
     while total is None or offset < min(total, WORKDAY_MAX):
         page = post_json(f"{api}/jobs", {"appliedFacets": facets, "limit": 20,
@@ -277,6 +313,128 @@ def fetch_workday(slug):
 
     with ThreadPoolExecutor(4) as pool:
         return list(pool.map(detail, cands))
+
+
+# Career sites with no public API (the Big 4): scrape the listing pages, keep titles that
+# pass the role filter, then fetch the description from each remaining job page.
+SCRAPE_MAX_PAGES = 80
+
+
+def page(url):
+    return get(url, timeout=30)[1].decode("utf-8", "replace")
+
+
+def between(s, start, end, cap=40_000):
+    i = s.find(start)
+    if i < 0:
+        return ""
+    j = s.find(end, i)
+    return s[i:j if j > 0 else i + cap][:cap]
+
+
+def strip_tags(s):
+    return re.sub(r"\s+", " ", html.unescape(re.sub(r"<[^>]+>", " ", s))).strip()
+
+
+def with_details(jobs, desc_of):
+    """desc_of(page_html, job) fills in desc (and posted, where the page has it)."""
+    jobs = [j for j in jobs if title_ok(j["title"])]
+
+    def one(j):
+        desc_of(page(j["url"]), j)
+        return j
+    with ThreadPoolExecutor(4) as pool:
+        return list(pool.map(one, jobs))
+
+
+def fetch_avature(slug):
+    """slug is '<host>/<portal>', e.g. 'apply.deloitte.co.uk/UKCareers'."""
+    base, jobs, seen = f"https://{slug}", [], set()
+    for n in range(SCRAPE_MAX_PAGES):
+        s = page(f"{base}/SearchJobs/?jobRecordsPerPage=20&jobOffset={n * 20}")
+        arts = re.findall(r'<article class="article article--result">(.*?)</article>', s, re.S)
+        if not arts:
+            break
+        for a in arts:
+            m = re.search(r'href="([^"]*/JobDetail/[^"]*?/(\d+))"[^>]*>(.*?)</a>', a, re.S)
+            if not m or m.group(2) in seen:
+                continue
+            seen.add(m.group(2))
+            sub = [strip_tags(x) for x in re.findall(r"<span>(.*?)</span>", a, re.S)]
+            posted = next((x[7:].strip() for x in sub if x.startswith("Posted:")), "")
+            try:
+                posted = datetime.strptime(posted, "%d %b %Y").date()
+            except ValueError:
+                posted = None
+            jobs.append({"id": m.group(2), "title": strip_tags(m.group(3)),
+                         "location": (sub[0] if sub else "") + " / United Kingdom",
+                         "url": html.unescape(m.group(1)), "posted": posted, "salary": ""})
+
+    def desc(s, j):
+        parts = s.split("js_collapsible__content")
+        j["desc"] = text(parts[-1].split("Share this job")[0]) if len(parts) > 2 else ""
+    return with_details(jobs, desc)
+
+
+def fetch_successfactors(slug):
+    """slug is '<host>/<site>[?<search query>]', e.g.
+    'careers.ey.com/ey?optionsFacetsDD_country=GB'."""
+    path, _, query = slug.partition("?")
+    host = path.split("/")[0]
+    jobs, seen = [], set()
+    for n in range(SCRAPE_MAX_PAGES):
+        s = page(f"https://{path}/search/?q=&{query}&startrow={n * 25}")
+        rows = re.findall(r'<tr class="data-row">(.*?)</tr>', s, re.S)
+        if not rows:
+            break
+        for r in rows:
+            m = re.search(r'<a href="([^"]*/job/[^"]*?/(\d+)/?)" class="jobTitle-link">'
+                          r'(.*?)</a>', r, re.S)
+            if not m or m.group(2) in seen:
+                continue
+            seen.add(m.group(2))
+            loc = re.search(r'class="jobLocation">(.*?)</span>', r, re.S)
+            jobs.append({"id": m.group(2), "title": strip_tags(m.group(3)),
+                         "location": strip_tags(loc.group(1)) if loc else "",
+                         "url": f"https://{host}" + html.unescape(m.group(1)),
+                         "posted": None, "salary": ""})
+
+    def desc(s, j):
+        j["desc"] = text(between(s, 'class="jobdescription"', 'class="jobmarkets"'))
+        m = re.search(r'itemprop="datePosted" content="([^"]+)"', s)
+        if m:
+            try:
+                j["posted"] = datetime.strptime(m.group(1), "%a %b %d %H:%M:%S %Z %Y").date()
+            except ValueError:
+                pass
+    return with_details(jobs, desc)
+
+
+def fetch_kpmg_uk(slug):
+    """KPMG UK's own site (slug 'www.kpmgcareers.co.uk'). No posting dates: the date in
+    its job pages is just the time of the request."""
+    jobs, seen = [], set()
+    for n in range(1, SCRAPE_MAX_PAGES + 1):
+        s = page(f"https://{slug}/search/vacancies/?page={n}")
+        cards = s.split('class="row vacancy-result')[1:]
+        if not cards:
+            break
+        for v in cards:
+            m = re.search(r'data-vacancy-id="(\d+)"', v)
+            t = re.search(r"<h3>(.*?)</h3>", v, re.S)
+            u = re.search(r'href="(/Vacancies/[^"]+)"', v)
+            if not (m and t and u) or m.group(1) in seen:
+                continue
+            seen.add(m.group(1))
+            loc = re.search(r'vacancy-location">.*?<b>(.*?)</b>', v, re.S)
+            jobs.append({"id": m.group(1), "title": strip_tags(t.group(1)),
+                         "location": (strip_tags(loc.group(1)) if loc else "") +
+                                     " / United Kingdom",
+                         "url": f"https://{slug}{u.group(1)}", "posted": None, "salary": ""})
+
+    def desc(s, j):
+        j["desc"] = text(between(s, 'row job-description', 'idse-panel'))
+    return with_details(jobs, desc)
 
 
 def load_boards():
@@ -330,7 +488,7 @@ def tracked():
 
 
 def title_ok(title):
-    return bool(ROLE.search(title)) and not NOT_ROLE.search(title)
+    return bool(ROLE.search(title)) and not NOT_ROLE.search(GRADE.sub(" ", title))
 
 
 def is_uk(loc):
@@ -351,9 +509,15 @@ def classify(j):
         j["where"] = loc + " ⚠ check UK-based"
     else:
         return None
-    j["level"] = "junior" if JUNIOR.search(title) else "mid"
+    j["level"] = "junior" if JUNIOR.search(GRADE.sub(" ", title)) else "mid"
 
     flags = []
+    grade = GRADE.search(title)
+    if grade:
+        flags.append(f"grade: {grade.group(0).lower()} (~2-5 yrs)")
+    rank = SENIOR_DESC.search(j["desc"][:120])
+    if rank:
+        flags.append(f"⚠ {rank.group(0)} per description")
     if NO_SPONSOR.search(j["desc"]):
         flags.append("❌ says no sponsorship")
     elif YES_SPONSOR.search(j["desc"]):
@@ -420,7 +584,8 @@ def main():
 
     def sort_key(j):
         return (j["first_seen"] != today, "❌" in j["flags"], not j["fit"],
-                "yrs" in j["flags"], j["level"] != "junior",
+                "yrs" in j["flags"] or "per description" in j["flags"],
+                j["level"] != "junior",
                 -(j["posted"] or date.min).toordinal(), j["company"].lower())
     keep.sort(key=sort_key)
 
@@ -431,10 +596,20 @@ def main():
         w.writeheader()
         w.writerows(keep)
 
+    write_js(keep, cols, today, len(boards), len(all_jobs))
     write_md(keep, today, len(boards), len(all_jobs))
     new = sum(j["first_seen"] == today for j in keep)
     print(f"{len(boards)} boards, {len(all_jobs)} jobs fetched, {len(keep)} match "
           f"({new} new today) -> {OUT_MD}")
+
+
+def write_js(jobs, cols, today, n_boards, n_jobs):
+    """Data for web/index.html. A script, not JSON, so the page works from file://."""
+    rows = [{**{c: str(j.get(c) or "") for c in cols},
+             "desc": re.sub(r"\n\s*\n\s*", "\n\n", j["desc"]).strip()} for j in jobs]
+    data = {"generated": today, "boards": n_boards, "scanned": n_jobs, "jobs": rows}
+    OUT_JS.write_text("window.SHORTLIST = " + json.dumps(data, ensure_ascii=False) + ";\n",
+                      encoding="utf-8")
 
 
 def cell(s):

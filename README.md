@@ -32,7 +32,14 @@ python daily.py --vault D:/notes/job-apps   # if the vault isn't at ../job-apps
 python daily.py --show-no-sponsor   # also list roles that say they won't sponsor
 ```
 
-Then open `Shortlist.md` in Obsidian and `/apply <link>` on anything worth it.
+Then browse the results in `web/index.html` (double-click it; no server needed) or open
+`Shortlist.md` in Obsidian, and `/apply <link>` on anything worth it.
+
+The web view reads `web/jobs.js`, which `daily.py` rewrites on every run. It has search,
+filters (★ fit, junior, new today, posted within, hide 5+ yrs), the full description of
+the selected job, and Save/Hide, which are kept in the browser's local storage so they
+survive re-runs. Keys: `j`/`k` next/previous, `o` open, `s` save, `h` hide,
+`c` copy `/apply <link>`, `/` search.
 
 ## Tuning
 
